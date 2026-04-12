@@ -649,7 +649,7 @@ function updateIndexProgress(done, total) {
 function isIndexable(ext) {
   return ['txt','csv','md','json','xml','html','htm',
           'docx','xlsx','xls','pdf',
-          'doc','rtf','log','ini','cfg','yaml','yml'].includes(ext);
+          'doc','ppt','pptx','rtf','log','ini','cfg','yaml','yml'].includes(ext);
 }
 
 async function extractText(fileNode) {
@@ -695,7 +695,7 @@ async function extractText(fileNode) {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       let text = '';
-      const maxPages = Math.min(pdf.numPages, 20); // cap pages
+      const maxPages = Math.min(pdf.numPages, 20);
       for (let i = 1; i <= maxPages; i++) {
         const page = await pdf.getPage(i);
         const tc = await page.getTextContent();
@@ -705,6 +705,96 @@ async function extractText(fileNode) {
     } catch { return ''; }
   }
 
+  // 古い Word .doc — バイナリからテキスト力技抽出
+  if (ext === 'doc') {
+    try {
+      const buf = await file.arrayBuffer();
+      return extractTextFromBinary(buf);
+    } catch { return ''; }
+  }
+
+  // PowerPoint .pptx — ZIP内XMLからテキスト抽出
+  if (ext === 'pptx') {
+    try {
+      const buf = await file.arrayBuffer();
+      return await extractPptxText(buf);
+    } catch { return ''; }
+  }
+
+  // 古い PowerPoint .ppt — バイナリからテキスト力技抽出
+  if (ext === 'ppt') {
+    try {
+      const buf = await file.arrayBuffer();
+      return extractTextFromBinary(buf);
+    } catch { return ''; }
+  }
+
+  return '';
+}
+
+// 古い .doc/.ppt からテキストを力技抽出
+// バイナリの中に埋まってる日本語・英語テキストを拾う
+function extractTextFromBinary(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const chunks = [];
+
+  // 方法1: UTF-16LE（Windowsの内部形式）でデコードしてみる
+  // .docはUTF-16LEでテキストを保持していることが多い
+  try {
+    const decoder = new TextDecoder('utf-16le', { fatal: false });
+    const raw = decoder.decode(bytes);
+    // 印字可能文字が3文字以上連続する部分を抽出
+    const matches = raw.match(/[\u0020-\u007E\u3000-\u9FFF\uFF00-\uFFEF]{3,}/g);
+    if (matches) chunks.push(...matches);
+  } catch {}
+
+  // 方法2: Shift_JIS領域をASCIIとして拾う（フォールバック）
+  try {
+    const decoder = new TextDecoder('shift_jis', { fatal: false });
+    const raw = decoder.decode(bytes);
+    const matches = raw.match(/[\u0020-\u007E\u3000-\u9FFF\uFF00-\uFFEF]{4,}/g);
+    if (matches) {
+      matches.forEach(m => {
+        if (!chunks.some(c => c.includes(m) || m.includes(c))) {
+          chunks.push(m);
+        }
+      });
+    }
+  } catch {}
+
+  // ゴミ除去: 明らかにバイナリヘッダー的なものを除外
+  const filtered = chunks.filter(c => {
+    if (c.length < 3) return false;
+    // ほぼ記号だけのものは除外
+    const letterRatio = (c.match(/[\u3040-\u9FFF\uFF00-\uFFEFa-zA-Z0-9]/g) || []).length / c.length;
+    return letterRatio > 0.3;
+  });
+
+  return filtered.join(' ').substring(0, 50000);
+}
+
+// .pptx からテキスト抽出（ZIPを手動展開してXMLからテキスト取得）
+async function extractPptxText(arrayBuffer) {
+  // pptxはZIPなので、SheetJSのZIP機能を借用してXMLを読む
+  // SheetJS内部のCFBやZIPを使えないので、簡易的にXMLタグ内テキストを抽出
+  try {
+    // JSZipがないので、pptxもバイナリ力技で
+    // ただしpptxはUTF-8のXMLが入ってるので、UTF-8デコードでかなり拾える
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const raw = decoder.decode(new Uint8Array(arrayBuffer));
+
+    // XMLタグの中身からテキストを抽出
+    // <a:t>テキスト</a:t> がPowerPointのテキストノード
+    const textMatches = raw.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
+    if (textMatches) {
+      const texts = textMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+      return texts.join(' ').substring(0, 50000);
+    }
+
+    // フォールバック: 日本語テキストっぽい部分を拾う
+    const jaMatches = raw.match(/[\u3000-\u9FFF\uFF00-\uFFEF][^\x00-\x08\x0E-\x1F]{2,}/g);
+    if (jaMatches) return jaMatches.join(' ').substring(0, 50000);
+  } catch {}
   return '';
 }
 
