@@ -349,6 +349,7 @@
     <label><input type="checkbox" id="chkContent" checked> 中身も検索</label>
   </div>
   <div class="toolbar-right">
+    <button class="btn" id="btnIndex" disabled style="background:#065f46;border-color:#065f46;color:#6ee7b7;">中身を読み込む</button>
     <button class="btn" id="btnExpandAll" disabled>全展開</button>
     <button class="btn" id="btnCollapseAll" disabled>全折畳</button>
     <button class="btn" id="btnExport" disabled>書き出し</button>
@@ -525,8 +526,13 @@ document.getElementById('btnOpen').addEventListener('click', async () => {
     const cached = await idbGetAll();
     cached.forEach(r => { contentIndex[r.path] = r.text; });
 
-    // Scan structure
+    // Scan structure (ツリーだけ。中身は読まない)
+    scanCount = 0;
+    $indexBar.style.display = 'block';
+    $indexCount.textContent = '構造を読み込み中...';
+    $indexFill.style.width = '0%';
     rootNode = await scanDirectory(dirHandle, '', 0);
+    $indexBar.style.display = 'none';
     loadUserData();
     markExplored(rootNode.path);
 
@@ -540,8 +546,8 @@ document.getElementById('btnOpen').addEventListener('click', async () => {
     renderTree();
     updateStats();
 
-    // Background: index file contents
-    indexAllFiles();
+    // 索引化は手動。ボタンを有効化するだけ
+    document.getElementById('btnIndex').disabled = false;
 
   } catch (e) {
     if (e.name !== 'AbortError') console.error(e);
@@ -1128,6 +1134,13 @@ document.getElementById('memoArea').addEventListener('input', (e) => {
 // Toolbar
 // ============================================================
 
+document.getElementById('btnIndex').addEventListener('click', () => {
+  document.getElementById('btnIndex').disabled = true;
+  document.getElementById('btnIndex').textContent = '読み込み中...';
+  indexAllFiles().then(() => {
+    document.getElementById('btnIndex').textContent = '読み込み完了';
+  });
+});
 document.getElementById('btnExpandAll').addEventListener('click', () => {
   if (rootNode) { expandAll(rootNode); renderTree(); updateStats(); }
 });
