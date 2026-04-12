@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAS Explorer — Fog of War</title>
+<!-- CDN: Word(.docx)読み込み -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
+<!-- CDN: Excel(.xlsx)読み込み -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- CDN: PDF読み込み -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3348;
+    --text: #e4e4e7;
+    --text-dim: #71717a;
+    --text-muted: #52525b;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --fog: #18191f;
+    --tag-original: #065f46;
+    --tag-wip: #92400e;
+    --tag-final: #1e40af;
+    --tag-print: #6b21a8;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ===== Header ===== */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .header-left { display: flex; align-items: center; gap: 16px; }
+
+  .app-title { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
+  .app-title span { color: var(--accent-light); }
+
+  .stats-bar { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); }
+  .stats-bar strong { color: var(--text); }
+
+  /* ===== Progress ===== */
+  .progress-section {
+    padding: 10px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: none;
+  }
+
+  .progress-row { display: flex; align-items: center; gap: 12px; }
+  .progress-label { font-size: 11px; color: var(--text-dim); min-width: 60px; }
+
+  .progress-track {
+    flex: 1; height: 6px; background: var(--fog);
+    border-radius: 3px; overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    border-radius: 3px; transition: width 0.4s;
+  }
+
+  .progress-pct { font-size: 12px; font-weight: 600; color: var(--accent-light); min-width: 40px; text-align: right; }
+
+  /* ===== Index progress ===== */
+  .index-bar {
+    padding: 6px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    display: none;
+  }
+
+  .index-bar .idx-track {
+    display: inline-block; width: 120px; height: 4px;
+    background: var(--fog); border-radius: 2px; overflow: hidden;
+    vertical-align: middle; margin-left: 8px;
+  }
+
+  .index-bar .idx-fill {
+    height: 100%; background: #4ade80; border-radius: 2px; transition: width 0.3s;
+  }
+
+  /* ===== Toolbar ===== */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 24px; border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text); font-size: 12px;
+    font-family: inherit; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent-light); }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-light); }
+
+  .search-box {
+    flex: 1; min-width: 200px; padding: 7px 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text);
+    font-size: 13px; font-family: inherit; outline: none;
+  }
+  .search-box:focus { border-color: var(--accent); }
+  .search-box::placeholder { color: var(--text-muted); }
+
+  .search-mode {
+    font-size: 11px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .search-mode label { cursor: pointer; display: flex; align-items: center; gap: 3px; }
+
+  .toolbar-right { display: flex; gap: 6px; margin-left: auto; }
+
+  /* ===== Main ===== */
+  .main { display: flex; height: calc(100vh - 160px); }
+
+  /* ===== Tree ===== */
+  .tree-panel { flex: 1; overflow: auto; padding: 4px 0; }
+  .tree-panel::-webkit-scrollbar { width: 6px; }
+  .tree-panel::-webkit-scrollbar-track { background: transparent; }
+  .tree-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .tree-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 12px 3px 12px; cursor: pointer;
+    transition: background 0.1s; min-height: 28px;
+  }
+  .tree-row:hover { background: var(--surface2); }
+  .tree-row.selected { background: var(--surface2); border-left: 2px solid var(--accent); }
+
+  /* Fog of War */
+  .tree-row.fog { opacity: 0.28; }
+  .tree-row.explored { opacity: 1; }
+
+  .indent { display: inline-block; width: 20px; flex-shrink: 0; }
+
+  .toggle {
+    width: 16px; height: 16px; display: flex; align-items: center;
+    justify-content: center; font-size: 10px; color: var(--text-dim);
+    flex-shrink: 0; transition: transform 0.15s;
+  }
+  .toggle.open { transform: rotate(90deg); }
+
+  .node-icon { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+
+  .node-name {
+    font-size: 13px; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .node-name.is-folder { font-weight: 600; }
+
+  /* Layer 1 */
+  .layer1 { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+
+  .file-count {
+    font-size: 10px; color: var(--text-dim);
+    background: var(--surface); padding: 1px 6px; border-radius: 3px;
+  }
+
+  .indexed-badge {
+    font-size: 9px; color: #4ade80; background: rgba(74,222,128,0.1);
+    padding: 1px 5px; border-radius: 3px;
+  }
+
+  .freshness { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
+  .freshness.hot { color: #fbbf24; background: rgba(251,191,36,0.1); }
+  .freshness.warm { color: #fb923c; background: rgba(251,146,60,0.1); }
+  .freshness.cool { color: #60a5fa; background: rgba(96,165,250,0.1); }
+  .freshness.cold { color: #94a3b8; background: rgba(148,163,184,0.1); }
+
+  /* Layer 2 */
+  .layer2 { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+  .tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    font-weight: 600; letter-spacing: 0.3px;
+  }
+  .tag-original { background: var(--tag-original); color: #6ee7b7; }
+  .tag-wip { background: var(--tag-wip); color: #fcd34d; }
+  .tag-final { background: var(--tag-final); color: #93c5fd; }
+  .tag-print { background: var(--tag-print); color: #d8b4fe; }
+
+  .memo-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-light); flex-shrink: 0;
+  }
+
+  /* ===== Detail Panel ===== */
+  .detail-panel {
+    width: 340px; border-left: 1px solid var(--border);
+    background: var(--surface); overflow-y: auto;
+    display: none; flex-direction: column;
+  }
+  .detail-panel.show { display: flex; }
+
+  .detail-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  .detail-title { font-size: 14px; font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+  .detail-path { font-size: 11px; color: var(--text-dim); word-break: break-all; }
+
+  .detail-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .detail-section-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-dim); margin-bottom: 8px;
+  }
+
+  .detail-info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+  .detail-info-row .label { color: var(--text-dim); }
+  .detail-info-row .value { color: var(--text); font-weight: 500; }
+
+  .tag-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .tag-btn {
+    font-size: 10px; padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-dim); cursor: pointer; font-family: inherit;
+  }
+  .tag-btn:hover { border-color: var(--accent); color: var(--accent-light); }
+  .tag-btn.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+  .memo-area {
+    width: 100%; min-height: 80px; padding: 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text);
+    font-size: 12px; font-family: inherit; resize: vertical; outline: none;
+  }
+  .memo-area:focus { border-color: var(--accent); }
+  .memo-area::placeholder { color: var(--text-muted); }
+
+  .assignee-input {
+    width: 100%; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text);
+    font-size: 12px; font-family: inherit; outline: none;
+  }
+  .assignee-input:focus { border-color: var(--accent); }
+  .assignee-input::placeholder { color: var(--text-muted); }
+
+  /* Content preview */
+  .content-preview {
+    max-height: 200px; overflow-y: auto; padding: 8px;
+    background: var(--surface2); border-radius: 6px;
+    font-size: 11px; color: var(--text-dim); line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* ===== Empty ===== */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; gap: 16px;
+    color: var(--text-dim); padding: 40px; text-align: center;
+  }
+  .empty-icon { font-size: 48px; opacity: 0.3; }
+  .empty-text { font-size: 14px; line-height: 1.6; }
+
+  .browser-warning {
+    padding: 16px 24px; background: #451a03; color: #fbbf24;
+    font-size: 13px; text-align: center; display: none;
+  }
+
+  .highlight { background: rgba(251,191,36,0.35); border-radius: 2px; padding: 0 1px; }
+
+  /* Search results panel */
+  .search-results {
+    padding: 8px 16px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim); display: none;
+  }
+
+  .search-hit {
+    padding: 6px 8px; margin: 4px 0; border-radius: 4px;
+    background: var(--surface2); cursor: pointer;
+  }
+  .search-hit:hover { border-left: 2px solid var(--accent); }
+  .search-hit .hit-path { font-size: 11px; color: var(--text-dim); }
+  .search-hit .hit-snippet { font-size: 11px; color: var(--text); margin-top: 2px; }
+
+  .ext-doc { color: #60a5fa; }
+  .ext-xls { color: #4ade80; }
+  .ext-pdf { color: #f87171; }
+  .ext-img { color: #c084fc; }
+
+  @media (max-width: 768px) {
+    .detail-panel { width: 100%; position: fixed; bottom: 0; left: 0; right: 0; height: 50vh; z-index: 10; }
+    .stats-bar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="browser-warning" id="browserWarning">
+  このブラウザは File System Access API に対応していません。Chrome / Edge をお使いください。
+</div>
+
+<div class="header">
+  <div class="header-left">
+    <div class="app-title">NAS <span>Explorer</span></div>
+    <div class="stats-bar" id="statsBar">
+      <span>フォルダ: <strong id="statFolders">0</strong></span>
+      <span>ファイル: <strong id="statFiles">0</strong></span>
+      <span>索引済み: <strong id="statIndexed">0</strong></span>
+    </div>
+  </div>
+</div>
+
+<div class="progress-section" id="progressSection">
+  <div class="progress-row">
+    <span class="progress-label">探索率</span>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+    <span class="progress-pct" id="progressPct">0%</span>
+  </div>
+</div>
+
+<div class="index-bar" id="indexBar">
+  中身を読み込み中... <strong id="indexCount">0</strong>件完了
+  <span class="idx-track"><span class="idx-fill" id="indexFill" style="width:0%"></span></span>
+</div>
+
+<div class="toolbar">
+  <button class="btn btn-primary" id="btnOpen">フォルダを選ぶ</button>
+  <input type="text" class="search-box" id="searchBox" placeholder="検索（ファイル名・中身・メモ・タグ）" disabled>
+  <div class="search-mode">
+    <label><input type="checkbox" id="chkContent" checked> 中身も検索</label>
+  </div>
+  <div class="toolbar-right">
+    <button class="btn" id="btnExpandAll" disabled>全展開</button>
+    <button class="btn" id="btnCollapseAll" disabled>全折畳</button>
+    <button class="btn" id="btnExport" disabled>書き出し</button>
+  </div>
+</div>
+
+<div class="search-results" id="searchResults"></div>
+
+<div class="main">
+  <div class="tree-panel" id="treePanel">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">&#x1F5C2;</div>
+      <div class="empty-text">
+        「フォルダを選ぶ」から<br>NAS共有フォルダを選択してください<br>
+        <small style="color:var(--text-muted)">フォルダ構造の表示 + ファイルの中身も検索できます</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+      <div class="detail-title" id="detailTitle">-</div>
+      <div class="detail-path" id="detailPath">-</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">情報</div>
+      <div class="detail-info-row"><span class="label">種類</span><span class="value" id="detailType">-</span></div>
+      <div class="detail-info-row"><span class="label">ファイル数</span><span class="value" id="detailCount">-</span></div>
+      <div class="detail-info-row"><span class="label">最終更新</span><span class="value" id="detailModified">-</span></div>
+      <div class="detail-info-row"><span class="label">サイズ</span><span class="value" id="detailSize">-</span></div>
+    </div>
+    <div class="detail-section" id="contentSection" style="display:none;">
+      <div class="detail-section-title">中身プレビュー</div>
+      <div class="content-preview" id="contentPreview"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">タグ</div>
+      <div class="tag-buttons" id="tagButtons">
+        <button class="tag-btn" data-tag="original">原本</button>
+        <button class="tag-btn" data-tag="wip">作業中</button>
+        <button class="tag-btn" data-tag="final">確定</button>
+        <button class="tag-btn" data-tag="print">印刷用</button>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">担当</div>
+      <input type="text" class="assignee-input" id="assigneeInput" placeholder="担当者名">
+    </div>
+    <div class="detail-section" style="flex:1;">
+      <div class="detail-section-title">メモ</div>
+      <textarea class="memo-area" id="memoArea" placeholder="このファイル/フォルダについてのメモ"></textarea>
+    </div>
+  </div>
+</div>
+
+<dialog id="exportDialog" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:500px;width:90%;">
+  <h3 style="margin-bottom:16px;font-size:14px;">書き出し形式</h3>
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+    <button class="btn" onclick="doExport('md')">Markdown</button>
+    <button class="btn" onclick="doExport('json')">JSON</button>
+    <button class="btn" onclick="doExport('csv')">CSV</button>
+    <button class="btn btn-primary" onclick="doExport('notebooklm')" style="background:#4ade80;border-color:#4ade80;color:#000;">NotebookLM用</button>
+  </div>
+  <p style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">NotebookLM用: ファイルの中身入りテキストを書き出します。<br>そのまま NotebookLM にドラッグ&ドロップで投入できます。</p>
+  <label style="font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" id="exportMemos" checked> メモ・タグも含める
+  </label>
+  <div style="margin-top:16px;text-align:right;">
+    <button class="btn" onclick="document.getElementById('exportDialog').close()">閉じる</button>
+  </div>
+</dialog>
+
+<script>
+// ============================================================
+// NAS Explorer — Fog of War + Full-text Index + 2-Layer
+// ============================================================
+
+const STORAGE_KEY = 'nas-explorer-userdata';
+const IDB_NAME = 'NASExplorerIndex';
+const IDB_STORE = 'contents';
+const IDB_VERSION = 1;
+
+// --- State ---
+let rootNode = null;
+let flatMap = {};          // path -> node
+let userDataMap = {};      // path -> { tags, memo, assignee, explored }
+let contentIndex = {};     // path -> text (in-memory search cache)
+let selectedPath = null;
+let searchQuery = '';
+let db = null;             // IndexedDB handle
+
+// --- DOM ---
+const $tree = document.getElementById('treePanel');
+const $empty = document.getElementById('emptyState');
+const $detail = document.getElementById('detailPanel');
+const $progSection = document.getElementById('progressSection');
+const $progFill = document.getElementById('progressFill');
+const $progPct = document.getElementById('progressPct');
+const $search = document.getElementById('searchBox');
+const $searchResults = document.getElementById('searchResults');
+const $indexBar = document.getElementById('indexBar');
+const $indexCount = document.getElementById('indexCount');
+const $indexFill = document.getElementById('indexFill');
+
+// ============================================================
+// IndexedDB
+// ============================================================
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(IDB_STORE)) {
+        d.createObjectStore(IDB_STORE, { keyPath: 'path' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbPut(path, text) {
+  return new Promise((resolve) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ path, text, ts: Date.now() });
+    tx.oncomplete = resolve;
+    tx.onerror = resolve; // don't block on error
+  });
+}
+
+function idbGetAll() {
+  return new Promise((resolve) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+// ============================================================
+// Browser check
+// ============================================================
+
+if (!('showDirectoryPicker' in window)) {
+  document.getElementById('browserWarning').style.display = 'block';
+  document.getElementById('btnOpen').disabled = true;
+}
+
+// PDF.js worker
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+// ============================================================
+// Main: Open folder
+// ============================================================
+
+document.getElementById('btnOpen').addEventListener('click', async () => {
+  try {
+    const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+
+    // Reset
+    rootNode = null;
+    flatMap = {};
+    contentIndex = {};
+    $empty.style.display = 'none';
+
+    // Open IndexedDB
+    if (!db) db = await openDB();
+
+    // Load cached content index
+    const cached = await idbGetAll();
+    cached.forEach(r => { contentIndex[r.path] = r.text; });
+
+    // Scan structure
+    rootNode = await scanDirectory(dirHandle, '', 0);
+    loadUserData();
+    markExplored(rootNode.path);
+
+    // Enable UI
+    $progSection.style.display = 'block';
+    $search.disabled = false;
+    document.getElementById('btnExpandAll').disabled = false;
+    document.getElementById('btnCollapseAll').disabled = false;
+    document.getElementById('btnExport').disabled = false;
+
+    renderTree();
+    updateStats();
+
+    // Background: index file contents
+    indexAllFiles();
+
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error(e);
+  }
+});
+
+// ============================================================
+// Scan directory (structure only, fast)
+// ============================================================
+
+const fileHandles = {}; // path -> FileSystemFileHandle
+
+async function scanDirectory(dirHandle, parentPath, depth) {
+  const path = parentPath ? `${parentPath}/${dirHandle.name}` : dirHandle.name;
+  const node = {
+    name: dirHandle.name, path, kind: 'directory',
+    children: [], fileCount: 0, folderCount: 0,
+    lastModified: 0, totalSize: 0,
+    expanded: depth < 1, depth,
+  };
+  flatMap[path] = node;
+
+  try {
+    for await (const entry of dirHandle.values()) {
+      if (entry.name.startsWith('.')) continue;
+
+      if (entry.kind === 'file') {
+        try {
+          const file = await entry.getFile();
+          const fp = `${path}/${entry.name}`;
+          const fileNode = {
+            name: entry.name, path: fp, kind: 'file',
+            size: file.size, lastModified: file.lastModified,
+            ext: getExt(entry.name), depth: depth + 1,
+          };
+          flatMap[fp] = fileNode;
+          fileHandles[fp] = entry;
+          node.children.push(fileNode);
+          node.fileCount++;
+          node.totalSize += file.size;
+          if (file.lastModified > node.lastModified) node.lastModified = file.lastModified;
+        } catch (e) {}
+      } else if (entry.kind === 'directory') {
+        const child = await scanDirectory(entry, path, depth + 1);
+        node.children.push(child);
+        node.folderCount++;
+        node.fileCount += child.fileCount;
+        node.folderCount += child.folderCount;
+        node.totalSize += child.totalSize;
+        if (child.lastModified > node.lastModified) node.lastModified = child.lastModified;
+      }
+    }
+  } catch (e) {}
+
+  node.children.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name, 'ja');
+  });
+
+  return node;
+}
+
+// ============================================================
+// Index file contents (background, non-blocking)
+// ============================================================
+
+async function indexAllFiles() {
+  const files = Object.values(flatMap).filter(n => n.kind === 'file' && isIndexable(n.ext));
+  const total = files.length;
+  let done = 0;
+
+  $indexBar.style.display = 'block';
+
+  for (const f of files) {
+    // Skip if already cached and file hasn't changed
+    if (contentIndex[f.path]) { done++; updateIndexProgress(done, total); continue; }
+
+    try {
+      const text = await extractText(f);
+      if (text) {
+        contentIndex[f.path] = text;
+        await idbPut(f.path, text);
+      }
+    } catch (e) {}
+
+    done++;
+    updateIndexProgress(done, total);
+
+    // Yield to UI every 5 files
+    if (done % 5 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+
+  $indexBar.style.display = 'none';
+  document.getElementById('statIndexed').textContent = Object.keys(contentIndex).length;
+  $search.placeholder = '検索（ファイル名・中身・メモ・タグ）';
+}
+
+function updateIndexProgress(done, total) {
+  $indexCount.textContent = done;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  $indexFill.style.width = pct + '%';
+  document.getElementById('statIndexed').textContent = Object.keys(contentIndex).length;
+}
+
+function isIndexable(ext) {
+  return ['txt','csv','md','json','xml','html','htm',
+          'docx','xlsx','xls','pdf',
+          'doc','rtf','log','ini','cfg','yaml','yml'].includes(ext);
+}
+
+async function extractText(fileNode) {
+  const handle = fileHandles[fileNode.path];
+  if (!handle) return '';
+  const file = await handle.getFile();
+  const ext = fileNode.ext;
+
+  // Plain text
+  if (['txt','csv','md','json','xml','html','htm','log','ini','cfg','yaml','yml','rtf'].includes(ext)) {
+    try {
+      const text = await file.text();
+      return text.substring(0, 50000); // cap at 50K chars
+    } catch { return ''; }
+  }
+
+  // Word .docx
+  if (ext === 'docx') {
+    try {
+      const buf = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer: buf });
+      return result.value.substring(0, 50000);
+    } catch { return ''; }
+  }
+
+  // Excel .xlsx / .xls
+  if (ext === 'xlsx' || ext === 'xls') {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      let text = '';
+      wb.SheetNames.forEach(name => {
+        const ws = wb.Sheets[name];
+        text += XLSX.utils.sheet_to_csv(ws) + '\n';
+      });
+      return text.substring(0, 50000);
+    } catch { return ''; }
+  }
+
+  // PDF
+  if (ext === 'pdf' && typeof pdfjsLib !== 'undefined') {
+    try {
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      let text = '';
+      const maxPages = Math.min(pdf.numPages, 20); // cap pages
+      for (let i = 1; i <= maxPages; i++) {
+        const page = await pdf.getPage(i);
+        const tc = await page.getTextContent();
+        text += tc.items.map(item => item.str).join(' ') + '\n';
+      }
+      return text.substring(0, 50000);
+    } catch { return ''; }
+  }
+
+  return '';
+}
+
+// ============================================================
+// User Data (Layer 2)
+// ============================================================
+
+function loadUserData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) userDataMap = JSON.parse(raw);
+  } catch { userDataMap = {}; }
+}
+
+function saveUserData() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(userDataMap));
+}
+
+function getUserData(path) {
+  if (!userDataMap[path]) userDataMap[path] = { tags: [], memo: '', assignee: '', explored: false };
+  return userDataMap[path];
+}
+
+function markExplored(path) {
+  const ud = getUserData(path);
+  if (!ud.explored) { ud.explored = true; saveUserData(); }
+}
+
+function isExplored(path) { return userDataMap[path]?.explored || false; }
+
+// ============================================================
+// Render tree
+// ============================================================
+
+function renderTree() {
+  if (!rootNode) return;
+  const c = document.createElement('div');
+  c.className = 'tree-container';
+  renderNode(rootNode, c);
+  const old = $tree.querySelector('.tree-container');
+  if (old) old.remove();
+  $tree.appendChild(c);
+}
+
+function renderNode(node, container) {
+  if (searchQuery && !matchesSearch(node)) return;
+
+  const div = document.createElement('div');
+  const row = document.createElement('div');
+  row.className = 'tree-row ' + (isExplored(node.path) ? 'explored' : 'fog');
+  if (selectedPath === node.path) row.classList.add('selected');
+
+  // Indent
+  for (let i = 0; i < node.depth; i++) {
+    const sp = document.createElement('span');
+    sp.className = 'indent';
+    row.appendChild(sp);
+  }
+
+  // Toggle
+  const tog = document.createElement('span');
+  tog.className = 'toggle';
+  if (node.kind === 'directory') {
+    tog.textContent = '\u25B6';
+    if (node.expanded) tog.classList.add('open');
+    tog.addEventListener('click', (e) => {
+      e.stopPropagation();
+      node.expanded = !node.expanded;
+      if (node.expanded) markExplored(node.path);
+      renderTree(); updateStats();
+    });
+  }
+  row.appendChild(tog);
+
+  // Icon
+  const ico = document.createElement('span');
+  ico.className = 'node-icon';
+  ico.textContent = node.kind === 'directory'
+    ? (node.expanded ? '\u{1F4C2}' : '\u{1F4C1}')
+    : getFileIcon(node.ext);
+  row.appendChild(ico);
+
+  // Name
+  const nm = document.createElement('span');
+  nm.className = 'node-name' + (node.kind === 'directory' ? ' is-folder' : '');
+  if (node.kind === 'file') { const ec = getExtClass(node.ext); if (ec) nm.classList.add(ec); }
+  nm.innerHTML = searchQuery ? highlightText(node.name, searchQuery) : escapeHtml(node.name);
+  row.appendChild(nm);
+
+  // Layer 1
+  const l1 = document.createElement('span');
+  l1.className = 'layer1';
+
+  if (node.kind === 'directory' && node.fileCount > 0) {
+    const fc = document.createElement('span');
+    fc.className = 'file-count';
+    fc.textContent = node.fileCount + '件';
+    l1.appendChild(fc);
+  }
+
+  if (node.kind === 'file' && contentIndex[node.path]) {
+    const ib = document.createElement('span');
+    ib.className = 'indexed-badge';
+    ib.textContent = '索引済';
+    l1.appendChild(ib);
+  }
+
+  const mt = node.lastModified;
+  if (mt > 0) {
+    const fr = document.createElement('span');
+    fr.className = 'freshness ' + getFreshnessClass(mt);
+    fr.textContent = getRelativeTime(mt);
+    l1.appendChild(fr);
+  }
+  row.appendChild(l1);
+
+  // Layer 2
+  const ud = userDataMap[node.path];
+  if (ud) {
+    const l2 = document.createElement('span');
+    l2.className = 'layer2';
+    if (ud.tags?.length) ud.tags.forEach(t => {
+      const tg = document.createElement('span');
+      tg.className = 'tag tag-' + t;
+      tg.textContent = getTagLabel(t);
+      l2.appendChild(tg);
+    });
+    if (ud.memo) {
+      const dot = document.createElement('span');
+      dot.className = 'memo-dot';
+      dot.title = ud.memo;
+      l2.appendChild(dot);
+    }
+    row.appendChild(l2);
+  }
+
+  // Click
+  row.addEventListener('click', () => {
+    selectedPath = node.path;
+    markExplored(node.path);
+    if (node.kind === 'directory' && !node.expanded) node.expanded = true;
+    showDetail(node);
+    renderTree(); updateStats();
+  });
+
+  div.appendChild(row);
+
+  if (node.kind === 'directory' && node.expanded && node.children) {
+    node.children.forEach(ch => renderNode(ch, div));
+  }
+
+  container.appendChild(div);
+}
+
+// ============================================================
+// Search (name + content + memo + tags)
+// ============================================================
+
+function matchesSearch(node) {
+  // スペース区切りでAND検索
+  const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+
+  // このノード自身のテキストを集める
+  const texts = [node.name.toLowerCase()];
+  const ud = userDataMap[node.path];
+  if (ud) {
+    if (ud.memo) texts.push(ud.memo.toLowerCase());
+    if (ud.assignee) texts.push(ud.assignee.toLowerCase());
+    if (ud.tags) texts.push(ud.tags.map(getTagLabel).join(' ').toLowerCase());
+  }
+  if (document.getElementById('chkContent').checked && contentIndex[node.path]) {
+    texts.push(contentIndex[node.path].toLowerCase());
+  }
+
+  const combined = texts.join(' ');
+  const selfMatch = terms.every(t => combined.includes(t));
+  if (selfMatch) return true;
+
+  // 子ノードに一致があればフォルダも表示
+  if (node.children) return node.children.some(c => matchesSearch(c));
+  return false;
+}
+
+let searchTimer;
+$search.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchQuery = $search.value.trim();
+    if (searchQuery && rootNode) expandMatching(rootNode);
+    renderTree();
+    if (searchQuery && document.getElementById('chkContent').checked) {
+      showContentSearchResults(searchQuery);
+    } else {
+      $searchResults.style.display = 'none';
+    }
+  }, 300);
+});
+
+function expandMatching(node) {
+  if (node.kind === 'directory' && node.children) {
+    if (node.children.some(c => matchesSearch(c))) {
+      node.expanded = true;
+    }
+    node.children.forEach(expandMatching);
+  }
+}
+
+function showContentSearchResults(q) {
+  const ql = q.toLowerCase();
+  const hits = [];
+
+  for (const [path, text] of Object.entries(contentIndex)) {
+    const idx = text.toLowerCase().indexOf(ql);
+    if (idx >= 0) {
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(text.length, idx + q.length + 60);
+      const snippet = (start > 0 ? '...' : '') +
+        text.substring(start, end).replace(/\n/g, ' ') +
+        (end < text.length ? '...' : '');
+      hits.push({ path, snippet });
+    }
+    if (hits.length >= 20) break;
+  }
+
+  if (hits.length === 0) {
+    $searchResults.style.display = 'none';
+    return;
+  }
+
+  $searchResults.style.display = 'block';
+  $searchResults.innerHTML = `<div style="margin-bottom:6px;font-weight:600;">中身ヒット: ${hits.length}件</div>`;
+
+  hits.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'search-hit';
+    div.innerHTML = `<div class="hit-path">${escapeHtml(h.path)}</div>
+      <div class="hit-snippet">${highlightText(h.snippet, q)}</div>`;
+    div.addEventListener('click', () => {
+      const node = flatMap[h.path];
+      if (node) {
+        selectedPath = h.path;
+        markExplored(h.path);
+        showDetail(node);
+        renderTree(); updateStats();
+      }
+    });
+    $searchResults.appendChild(div);
+  });
+}
+
+// ============================================================
+// Detail Panel
+// ============================================================
+
+function showDetail(node) {
+  $detail.classList.add('show');
+  document.getElementById('detailTitle').textContent = node.name;
+  document.getElementById('detailPath').textContent = node.path;
+  document.getElementById('detailType').textContent =
+    node.kind === 'directory' ? 'フォルダ' : getExtLabel(node.ext);
+  document.getElementById('detailCount').textContent =
+    node.kind === 'directory' ? `${node.fileCount} ファイル / ${node.folderCount} フォルダ` : '-';
+  document.getElementById('detailModified').textContent =
+    node.lastModified ? new Date(node.lastModified).toLocaleString('ja-JP') : '-';
+  document.getElementById('detailSize').textContent =
+    node.kind === 'directory' ? formatSize(node.totalSize) : formatSize(node.size);
+
+  // Content preview
+  const cs = document.getElementById('contentSection');
+  const cp = document.getElementById('contentPreview');
+  if (contentIndex[node.path]) {
+    cs.style.display = 'block';
+    cp.textContent = contentIndex[node.path].substring(0, 1000);
+  } else {
+    cs.style.display = 'none';
+  }
+
+  // Tags
+  const ud = getUserData(node.path);
+  document.querySelectorAll('.tag-btn').forEach(btn => {
+    btn.classList.toggle('active', ud.tags.includes(btn.dataset.tag));
+  });
+
+  document.getElementById('assigneeInput').value = ud.assignee || '';
+  document.getElementById('memoArea').value = ud.memo || '';
+}
+
+// Tag buttons
+document.getElementById('tagButtons').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tag-btn');
+  if (!btn || !selectedPath) return;
+  const tag = btn.dataset.tag;
+  const ud = getUserData(selectedPath);
+  const idx = ud.tags.indexOf(tag);
+  if (idx >= 0) ud.tags.splice(idx, 1); else ud.tags.push(tag);
+  btn.classList.toggle('active');
+  saveUserData();
+  renderTree();
+});
+
+document.getElementById('assigneeInput').addEventListener('input', (e) => {
+  if (!selectedPath) return;
+  getUserData(selectedPath).assignee = e.target.value;
+  saveUserData();
+});
+
+document.getElementById('memoArea').addEventListener('input', (e) => {
+  if (!selectedPath) return;
+  getUserData(selectedPath).memo = e.target.value;
+  saveUserData();
+  renderTree();
+});
+
+// ============================================================
+// Toolbar
+// ============================================================
+
+document.getElementById('btnExpandAll').addEventListener('click', () => {
+  if (rootNode) { expandAll(rootNode); renderTree(); updateStats(); }
+});
+document.getElementById('btnCollapseAll').addEventListener('click', () => {
+  if (rootNode) { collapseAll(rootNode); rootNode.expanded = true; renderTree(); }
+});
+document.getElementById('btnExport').addEventListener('click', () => {
+  document.getElementById('exportDialog').showModal();
+});
+
+function expandAll(n) {
+  if (n.kind === 'directory') {
+    n.expanded = true; markExplored(n.path);
+    n.children?.forEach(expandAll);
+  }
+}
+function collapseAll(n) {
+  if (n.kind === 'directory') { n.expanded = false; n.children?.forEach(collapseAll); }
+}
+
+// ============================================================
+// Stats
+// ============================================================
+
+function updateStats() {
+  if (!rootNode) return;
+  let folders = 0, files = 0, explored = 0, total = 0;
+  Object.values(flatMap).forEach(n => {
+    if (n.kind === 'directory') { folders++; total++; if (isExplored(n.path)) explored++; }
+    else files++;
+  });
+  document.getElementById('statFolders').textContent = folders;
+  document.getElementById('statFiles').textContent = files;
+  const pct = total > 0 ? Math.round((explored / total) * 100) : 0;
+  $progFill.style.width = pct + '%';
+  $progPct.textContent = pct + '%';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function getExt(name) { const m = name.match(/\.([^.]+)$/); return m ? m[1].toLowerCase() : ''; }
+
+function getFileIcon(ext) {
+  const m = {
+    doc:'\u{1F4DD}',docx:'\u{1F4DD}',docm:'\u{1F4DD}',
+    xls:'\u{1F4CA}',xlsx:'\u{1F4CA}',xlsm:'\u{1F4CA}',
+    ppt:'\u{1F4CA}',pptx:'\u{1F4CA}',pdf:'\u{1F4D1}',
+    jpg:'\u{1F5BC}',jpeg:'\u{1F5BC}',png:'\u{1F5BC}',gif:'\u{1F5BC}',
+    txt:'\u{1F4C4}',csv:'\u{1F4C4}',md:'\u{1F4C4}',
+    mp3:'\u{1F3B5}',wav:'\u{1F3B5}',mp4:'\u{1F3AC}',mov:'\u{1F3AC}',
+    zip:'\u{1F4E6}',html:'\u{1F310}',
+  };
+  return m[ext] || '\u{1F4C4}';
+}
+
+function getExtClass(ext) {
+  if (['doc','docx','docm'].includes(ext)) return 'ext-doc';
+  if (['xls','xlsx','xlsm'].includes(ext)) return 'ext-xls';
+  if (['pdf'].includes(ext)) return 'ext-pdf';
+  if (['jpg','jpeg','png','gif'].includes(ext)) return 'ext-img';
+  return '';
+}
+
+function getExtLabel(ext) {
+  const m = { doc:'Word',docx:'Word',docm:'Word(マクロ)',xls:'Excel',xlsx:'Excel',xlsm:'Excel(マクロ)',
+    ppt:'PowerPoint',pptx:'PowerPoint',pdf:'PDF',jpg:'JPEG',png:'PNG',txt:'テキスト',csv:'CSV',md:'Markdown',html:'HTML' };
+  return m[ext] || ext.toUpperCase() || 'ファイル';
+}
+
+function getTagLabel(t) { return {original:'原本',wip:'作業中',final:'確定',print:'印刷用'}[t]||t; }
+
+function getFreshnessClass(ts) {
+  const d = (Date.now()-ts)/(86400000);
+  if (d<7) return 'hot'; if (d<30) return 'warm'; if (d<180) return 'cool'; return 'cold';
+}
+
+function getRelativeTime(ts) {
+  const m = Math.floor((Date.now()-ts)/60000);
+  if (m<60) return m+'分前';
+  const h = Math.floor(m/60); if (h<24) return h+'時間前';
+  const d = Math.floor(h/24); if (d<30) return d+'日前';
+  const mo = Math.floor(d/30); if (mo<12) return mo+'ヶ月前';
+  return Math.floor(mo/12)+'年前';
+}
+
+function formatSize(b) {
+  if (!b) return '-';
+  if (b<1024) return b+' B';
+  if (b<1048576) return (b/1024).toFixed(1)+' KB';
+  if (b<1073741824) return (b/1048576).toFixed(1)+' MB';
+  return (b/1073741824).toFixed(1)+' GB';
+}
+
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function highlightText(text, q) {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i===-1) return escapeHtml(text);
+  return escapeHtml(text.substring(0,i))+'<span class="highlight">'+escapeHtml(text.substring(i,i+q.length))+'</span>'+escapeHtml(text.substring(i+q.length));
+}
+
+// ============================================================
+// Export
+// ============================================================
+
+function doExport(fmt) {
+  if (!rootNode) return;
+  const incMemo = document.getElementById('exportMemos').checked;
+  let content='', filename='';
+  switch(fmt) {
+    case 'md': content=exportMd(rootNode,0,incMemo); filename='nas_structure.md'; break;
+    case 'json': content=JSON.stringify(exportJson(rootNode,incMemo),null,2); filename='nas_structure.json'; break;
+    case 'csv': content=exportCsv(incMemo); filename='nas_structure.csv'; break;
+    case 'notebooklm': content=exportNotebookLM(); filename='nas_for_notebooklm.txt'; break;
+  }
+  const blob = new Blob([content],{type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+  URL.revokeObjectURL(a.href);
+  document.getElementById('exportDialog').close();
+}
+
+function exportMd(n,indent,inc) {
+  let md = '  '.repeat(indent) + '- ' + n.name + (n.kind==='directory'?'/':'');
+  if (n.kind==='directory'&&n.fileCount) md += ` (${n.fileCount}件)`;
+  if (inc) {
+    const ud=userDataMap[n.path];
+    if (ud) {
+      if (ud.tags.length) md += ` [${ud.tags.map(getTagLabel).join(', ')}]`;
+      if (ud.assignee) md += ` @${ud.assignee}`;
+      if (ud.memo) md += ` — ${ud.memo.replace(/\n/g,' ')}`;
+    }
+  }
+  md += '\n';
+  if (n.children) n.children.forEach(c => { md += exportMd(c,indent+1,inc); });
+  return md;
+}
+
+function exportJson(n,inc) {
+  const o = { name:n.name, kind:n.kind, path:n.path };
+  if (n.kind==='directory') { o.fileCount=n.fileCount; o.folderCount=n.folderCount; }
+  else { o.size=n.size; o.ext=n.ext; }
+  if (n.lastModified) o.lastModified = new Date(n.lastModified).toISOString();
+  if (inc) {
+    const ud=userDataMap[n.path];
+    if (ud&&(ud.tags.length||ud.memo||ud.assignee)) o.userData={tags:ud.tags,memo:ud.memo,assignee:ud.assignee};
+  }
+  if (n.children) o.children = n.children.map(c=>exportJson(c,inc));
+  return o;
+}
+
+function exportCsv(inc) {
+  const rows=[['パス','種類','名前','拡張子','ファイル数','最終更新','サイズ']];
+  if (inc) rows[0].push('タグ','担当','メモ');
+  Object.values(flatMap).forEach(n => {
+    const r=[n.path, n.kind==='directory'?'フォルダ':'ファイル', n.name, n.ext||'',
+      n.kind==='directory'?n.fileCount:'', n.lastModified?new Date(n.lastModified).toISOString():'',
+      n.kind==='file'?n.size:(n.totalSize||'')];
+    if (inc) { const ud=userDataMap[n.path]; r.push(ud?ud.tags.map(getTagLabel).join(';'):'', ud?ud.assignee:'', ud?ud.memo.replace(/\n/g,' '):''); }
+    rows.push(r);
+  });
+  return rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+}
+
+function exportNotebookLM() {
+  // NotebookLM用: フォルダ構造 + 各ファイルの中身をまとめたテキスト
+  // NotebookLMのソース1つあたり500,000語制限があるので、大きすぎる場合は分割が必要
+  let out = '';
+
+  // ヘッダー
+  out += '='.repeat(60) + '\n';
+  out += 'NAS共有フォルダ — 構造と内容一覧\n';
+  out += '書き出し日時: ' + new Date().toLocaleString('ja-JP') + '\n';
+  out += '='.repeat(60) + '\n\n';
+
+  // フォルダ構造の概要
+  out += '## フォルダ構造\n\n';
+  out += exportMd(rootNode, 0, true);
+  out += '\n\n';
+
+  // 各ファイルの中身
+  out += '## 各ファイルの内容\n\n';
+
+  const files = Object.values(flatMap).filter(n => n.kind === 'file');
+  let indexed = 0;
+
+  files.forEach(f => {
+    const content = contentIndex[f.path];
+    const ud = userDataMap[f.path];
+
+    out += '-'.repeat(50) + '\n';
+    out += 'ファイル: ' + f.path + '\n';
+    out += '種類: ' + getExtLabel(f.ext) + '\n';
+    if (f.lastModified) out += '最終更新: ' + new Date(f.lastModified).toLocaleString('ja-JP') + '\n';
+    if (f.size) out += 'サイズ: ' + formatSize(f.size) + '\n';
+
+    if (ud) {
+      if (ud.tags.length) out += 'タグ: ' + ud.tags.map(getTagLabel).join(', ') + '\n';
+      if (ud.assignee) out += '担当: ' + ud.assignee + '\n';
+      if (ud.memo) out += 'メモ: ' + ud.memo + '\n';
+    }
+
+    if (content) {
+      out += '\n【内容】\n';
+      // NotebookLMに食わせるので、ファイルごとの内容は最大5000文字に制限
+      out += content.substring(0, 5000);
+      if (content.length > 5000) out += '\n... (以下省略、全' + content.length + '文字)';
+      out += '\n';
+      indexed++;
+    } else {
+      out += '\n【内容】(読み込み未対応 または 未索引)\n';
+    }
+
+    out += '\n';
+  });
+
+  // フッター
+  out += '='.repeat(60) + '\n';
+  out += '合計: ' + files.length + 'ファイル, うち' + indexed + 'ファイルの内容を含む\n';
+  out += '='.repeat(60) + '\n';
+
+  return out;
+}
+</script>
+</body>
+</html>
