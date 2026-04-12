@@ -554,6 +554,8 @@ document.getElementById('btnOpen').addEventListener('click', async () => {
 
 const fileHandles = {}; // path -> FileSystemFileHandle
 
+let scanCount = 0;
+
 async function scanDirectory(dirHandle, parentPath, depth) {
   const path = parentPath ? `${parentPath}/${dirHandle.name}` : dirHandle.name;
   const node = {
@@ -593,6 +595,10 @@ async function scanDirectory(dirHandle, parentPath, depth) {
         node.totalSize += child.totalSize;
         if (child.lastModified > node.lastModified) node.lastModified = child.lastModified;
       }
+
+      // NAS経由は遅いので20件ごとにUIに息継ぎさせる
+      scanCount++;
+      if (scanCount % 20 === 0) await new Promise(r => setTimeout(r, 0));
     }
   } catch (e) {}
 
@@ -608,7 +614,12 @@ async function scanDirectory(dirHandle, parentPath, depth) {
 // Index file contents (background, non-blocking)
 // ============================================================
 
+let indexingActive = false;
+
 async function indexAllFiles() {
+  if (indexingActive) return;
+  indexingActive = true;
+
   const files = Object.values(flatMap).filter(n => n.kind === 'file' && isIndexable(n.ext));
   const total = files.length;
   let done = 0;
@@ -616,8 +627,11 @@ async function indexAllFiles() {
   $indexBar.style.display = 'block';
 
   for (const f of files) {
-    // Skip if already cached and file hasn't changed
+    // Skip if already cached
     if (contentIndex[f.path]) { done++; updateIndexProgress(done, total); continue; }
+
+    // Skip large files (>10MB) to avoid freezing
+    if (f.size > 10 * 1024 * 1024) { done++; updateIndexProgress(done, total); continue; }
 
     try {
       const text = await extractText(f);
@@ -630,13 +644,14 @@ async function indexAllFiles() {
     done++;
     updateIndexProgress(done, total);
 
-    // Yield to UI every 5 files
-    if (done % 5 === 0) await new Promise(r => setTimeout(r, 0));
+    // Yield to UI every single file — NASは遅いので頻繁に息継ぎ
+    await new Promise(r => setTimeout(r, 10));
   }
 
   $indexBar.style.display = 'none';
   document.getElementById('statIndexed').textContent = Object.keys(contentIndex).length;
   $search.placeholder = '検索（ファイル名・中身・メモ・タグ）';
+  indexingActive = false;
 }
 
 function updateIndexProgress(done, total) {
