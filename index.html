@@ -104,7 +104,10 @@
       <span class="step-num">2</span>
       <span class="step-title">中身を読み込む</span>
       <div class="step-desc">Word・Excel・PDF等の中身をテキスト化します（時間がかかります）</div>
-      <button class="btn btn-primary" id="btnIndex" disabled>中身を読み込む</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" id="btnIndex" disabled>中身を読み込む</button>
+        <button class="btn" id="btnStop" style="display:none;background:#991b1b;border-color:#991b1b;color:#fca5a5;">止める</button>
+      </div>
       <div class="progress-area" id="indexProgress">
         <div class="progress-track"><div class="progress-fill" id="indexFill"></div></div>
         <div class="progress-text" id="indexText">読み込み中...</div>
@@ -117,7 +120,8 @@
       <span class="step-num">3</span>
       <span class="step-title">書き出す</span>
       <div class="step-desc">NotebookLMにドラッグ&ドロップで投入できるテキストファイル</div>
-      <button class="btn btn-green" id="btnExport" disabled>NotebookLM用に書き出す</button>
+      <button class="btn btn-green" id="btnExport">NotebookLM用に書き出す</button>
+      <div class="step-desc" style="margin-top:4px;color:#4ade80;" id="exportHint">Step 1完了後いつでも書き出せます（中身読み込みは途中でもOK）</div>
       <div class="result" id="exportResult"></div>
     </div>
   </div>
@@ -221,10 +225,19 @@ async function scanDir(dirHandle, parentPath) {
 // Step 2: Index file contents
 // ============================================================
 
+let stopIndexing = false;
+
+document.getElementById('btnStop').addEventListener('click', () => {
+  stopIndexing = true;
+});
+
 document.getElementById('btnIndex').addEventListener('click', async () => {
   const btn = document.getElementById('btnIndex');
+  const btnStop = document.getElementById('btnStop');
   btn.disabled = true;
   btn.textContent = '読み込み中...';
+  btnStop.style.display = 'inline-block';
+  stopIndexing = false;
 
   const prog = document.getElementById('indexProgress');
   prog.style.display = 'block';
@@ -236,44 +249,45 @@ document.getElementById('btnIndex').addEventListener('click', async () => {
   let success = 0;
   let errors = 0;
 
-  // Process in batches with timeout per file
-  const BATCH_SIZE = 5;
-  const FILE_TIMEOUT = 8000; // 8 seconds per file
+  const FILE_TIMEOUT = 5000;
 
-  for (let i = 0; i < indexable.length; i += BATCH_SIZE) {
-    const batch = indexable.slice(i, i + BATCH_SIZE);
-    const results = await Promise.allSettled(
-      batch.map(f => withTimeout(extractText(f), FILE_TIMEOUT))
-    );
+  for (const f of indexable) {
+    if (stopIndexing) break;
 
-    results.forEach((result, idx) => {
-      const f = batch[idx];
-      if (result.status === 'fulfilled' && result.value && !result.value.startsWith('[')) {
-        contentMap[f.path] = result.value;
+    try {
+      const text = await withTimeout(extractText(f), FILE_TIMEOUT);
+      if (text && !text.startsWith('[')) {
+        contentMap[f.path] = text;
         success++;
-      } else {
-        errors++;
       }
-    });
+    } catch (e) {
+      errors++;
+    }
 
-    done += batch.length;
+    done++;
     const pct = Math.round((done / total) * 100);
     document.getElementById('indexFill').style.width = pct + '%';
     document.getElementById('indexText').textContent =
       `${done}/${total} 件処理 (${success} 件成功)`;
 
-    // Yield to UI — longer pause every batch
-    await new Promise(r => setTimeout(r, 50));
+    // 毎ファイル必ずUIに息継ぎ
+    await new Promise(r => setTimeout(r, 30));
   }
 
   prog.style.display = 'none';
+  btnStop.style.display = 'none';
   const res = document.getElementById('indexResult');
   res.style.display = 'block';
-  res.innerHTML = `<strong>${success}</strong> ファイルの中身を読み込み完了` +
-    (errors > 0 ? `（${errors} 件エラー）` : '');
 
-  btn.textContent = '読み込み完了';
-  document.getElementById('btnExport').disabled = false;
+  if (stopIndexing) {
+    res.innerHTML = `<strong>${success}</strong> ファイル読み込み済み（途中で停止）。このまま書き出せます。`;
+    btn.textContent = '中身を読み込む（続き）';
+    btn.disabled = false;
+  } else {
+    res.innerHTML = `<strong>${success}</strong> ファイルの中身を読み込み完了` +
+      (errors > 0 ? `（${errors} 件スキップ）` : '');
+    btn.textContent = '読み込み完了';
+  }
 });
 
 // ============================================================
