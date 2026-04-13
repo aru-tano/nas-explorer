@@ -236,25 +236,34 @@ document.getElementById('btnIndex').addEventListener('click', async () => {
   let success = 0;
   let errors = 0;
 
-  for (const f of indexable) {
-    try {
-      const text = await extractText(f);
-      if (text && !text.startsWith('[')) {
-        contentMap[f.path] = text;
-        success++;
-      }
-    } catch (e) {
-      errors++;
-    }
+  // Process in batches with timeout per file
+  const BATCH_SIZE = 5;
+  const FILE_TIMEOUT = 8000; // 8 seconds per file
 
-    done++;
+  for (let i = 0; i < indexable.length; i += BATCH_SIZE) {
+    const batch = indexable.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(f => withTimeout(extractText(f), FILE_TIMEOUT))
+    );
+
+    results.forEach((result, idx) => {
+      const f = batch[idx];
+      if (result.status === 'fulfilled' && result.value && !result.value.startsWith('[')) {
+        contentMap[f.path] = result.value;
+        success++;
+      } else {
+        errors++;
+      }
+    });
+
+    done += batch.length;
     const pct = Math.round((done / total) * 100);
     document.getElementById('indexFill').style.width = pct + '%';
     document.getElementById('indexText').textContent =
       `${done}/${total} 件処理 (${success} 件成功)`;
 
-    // Yield to UI
-    if (done % 3 === 0) await new Promise(r => setTimeout(r, 10));
+    // Yield to UI — longer pause every batch
+    await new Promise(r => setTimeout(r, 50));
   }
 
   prog.style.display = 'none';
@@ -332,6 +341,14 @@ ${'='.repeat(60)}
 // ============================================================
 // Text extraction
 // ============================================================
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(v => { clearTimeout(timer); resolve(v); })
+           .catch(e => { clearTimeout(timer); reject(e); });
+  });
+}
 
 function isIndexable(ext) {
   return ['txt','csv','md','json','xml','html','htm',
